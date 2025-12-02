@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>배색 원리 기반 컬러 팔레트 추천기</title>
+    <!-- Tailwind CSS CDN 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 1. [광고 설정] : 광고 네트워크 스크립트 코드 (예: AdSense)를 여기에 삽입합니다. -->
+    <!--
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-XXXXXXXXXXXXX" crossorigin="anonymous"></script>
+    -->
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        /* 2D 색상 선택 필드 (Saturation & Lightness) */
+        .color-field {
+            /* Base color set by JS, then overlaid with gradients for S & L */
+            position: relative;
+            cursor: crosshair;
+        }
+        /* 명도(Lightness) 그라데이션 (위에서 투명, 아래에서 블랙 - 표준 HSB/HSV 모델 시각화) */
+        .color-field::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            /* 아래쪽(bottom)을 블랙(V=0%)으로 만듭니다. */
+            background: linear-gradient(to bottom, transparent, black); 
+            pointer-events: none;
+        }
+        /* 채도(Saturation) 그라데이션 (왼쪽에서 오른쪽으로 화이트) */
+        .color-field::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to right, white, transparent); /* Saturation (0% at left) */
+            pointer-events: none;
+        }
+
+        /* Hue 슬라이더 (색상 띠) */
+        .hue-slider {
+            width: 40px; /* 고정 너비 */
+            background: linear-gradient(
+                to top, 
+                hsl(0, 100%, 50%), 
+                hsl(60, 100%, 50%), 
+                hsl(120, 100%, 50%), 
+                hsl(180, 100%, 50%), 
+                hsl(240, 100%, 50%), 
+                hsl(300, 100%, 50%), 
+                hsl(360, 100%, 50%)
+            );
+            cursor: pointer;
+        }
+        
+        /* 사용자 선택 위치 마커 (S/L 필드) */
+        .selection-marker {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 0 2px black;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            transition: opacity 0.1s ease;
+        }
+
+        /* Hue 선택 마커 (슬라이더) */
+        .hue-marker {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 8px;
+            background-color: white;
+            border-radius: 9999px;
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+            transform: translateY(-50%);
+            pointer-events: none;
+            transition: opacity 0.1s ease;
+        }
+
+        .color-box {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .color-box:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 min-h-screen">
+
+    <div class="max-w-4xl mx-auto">
+        <header class="mb-8">
+            <h1 class="text-3xl font-extrabold text-gray-900 mb-2">🎨 배색 원리 팔레트 추천기</h1>
+            <p class="text-gray-500">
+                선택한 색상(색상, 채도, 명도)을 기준으로 배색 기법을 활용하여 5가지 조화로운 색상을 추천합니다.
+            </p>
+        </header>
+
+        <!-- 1. 색상 선택 영역 (2D 색상 필드 + Hue 슬라이더) -->
+        <div class="bg-white p-6 rounded-xl shadow-lg mb-8">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">1. 포인트 색상 선택</h2>
+            <div class="flex gap-4 items-stretch h-96">
+                
+                <!-- 2D 색상 필드 (Saturation & Lightness) - 정사각형 영역 -->
+                <div id="colorField" class="relative flex-grow h-full w-full rounded-xl overflow-hidden border-2 border-gray-200 color-field">
+                    <!-- S/L 선택 마커 -->
+                    <div id="selectionMarker" class="selection-marker opacity-0"></div>
+                </div>
+
+                <!-- Hue 슬라이더 -->
+                <div id="hueSlider" class="relative rounded-xl overflow-hidden border-2 border-gray-200 hue-slider">
+                    <!-- Hue 선택 마커 -->
+                    <div id="hueMarker" class="hue-marker opacity-0"></div>
+                </div>
+            </div>
+            
+            <p id="selectedColorDisplay" class="text-center mt-4 text-lg font-medium">
+                선택된 색상: <span id="currentHex" class="font-bold text-gray-900">#FF0000</span>
+            </p>
+        </div>
+        
+
+        <!-- 2. 추천 팔레트 영역 -->
+        <div class="bg-white p-6 rounded-xl shadow-lg">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">2. 추천 팔레트 (6가지 색상)</h2>
+            <div id="paletteContainer" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+                <!-- 컬러 박스가 여기에 동적으로 삽입됩니다. -->
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 3. 광고 영역 (Advertisement Area) -->
+    <div class="max-w-4xl mx-auto mt-8 p-4 bg-gray-100 rounded-xl border border-gray-300 text-center text-gray-600">
+        <!-- 2. [광고 설정] : 광고 단위 코드 (<ins> 또는 <div>)를 여기에 삽입합니다. -->
+        <p class="font-semibold mb-2">광고 배너 영역 (Advertisement Banner)</p>
+        <div class="w-full h-20 bg-gray-200 flex items-center justify-center rounded-lg">
+            <span class="text-sm">728x90px (광고 단위 코드 삽입 위치)</span>
+            <!-- 
+            여기에 광고 네트워크에서 제공하는 <ins> 또는 <div> 형태의 광고 단위 코드를 붙여넣으세요.
+            예시:
+            <ins class="adsbygoogle"
+                 style="display:inline-block;width:728px;height:90px"
+                 data-ad-client="ca-pub-XXXXXXXXXXXXX"
+                 data-ad-slot="YYYYYYYYYY"></ins>
+            <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+            -->
+        </div>
+    </div>
+
+
+    <script type="module">
+        // -----------------------------------------------------------
+        // 1. 유틸리티 함수 (HSL <-> HEX 변환 및 보조 함수)
+        // -----------------------------------------------------------
+
+        /**
+         * HSL 값을 HEX 코드로 변환합니다.
+         * @param {number} h Hue (0-360)
+         * @param {number} s Saturation (0-100)
+         * @param {number} l Lightness (0-100)
+         * @returns {string} HEX 코드 (#RRGGBB)
+         */
+        function hslToHex(h, s, l) {
+            h = Math.max(0, Math.min(360, h));
+            s = Math.max(0, Math.min(100, s));
+            l = Math.max(0, Math.min(100, l));
+            
+            s /= 100;
+            l /= 100;
+            let c = (1 - Math.abs(2 * l - 1)) * s,
+                x = c * (1 - Math.abs((h / 60) % 2 - 1)),
+                m = l - c / 2,
+                r = 0, g = 0, b = 0;
+
+            if (0 <= h && h < 60) {
+                r = c; g = x; b = 0;
+            } else if (60 <= h && h < 120) {
+                r = x; g = c; b = 0;
+            } else if (120 <= h && h < 180) {
+                r = 0; g = c; b = x;
+            } else if (180 <= h && h < 240) {
+                r = 0; g = x; b = c;
+            } else if (240 <= h && h < 300) {
+                r = x; g = 0; b = c;
+            } else if (300 <= h && h < 360) {
+                r = c; g = 0; b = x;
+            }
+            r = Math.round((r + m) * 255).toString(16);
+            g = Math.round((g + m) * 255).toString(16);
+            b = Math.round((b + m) * 255).toString(16);
+
+            if (r.length === 1) r = "0" + r;
+            if (g.length === 1) g = "0" + g;
+            if (b.length === 1) b = "0" + b;
+
+            return "#" + r + g + b;
+        }
+
+        /**
+         * HEX 코드를 HSL 값으로 변환합니다. (텍스트 색상 결정에 사용)
+         */
+        function hexToHsl(hex) {
+            let r = 0, g = 0, b = 0;
+            if (hex.length === 4) {
+                r = parseInt(hex[1] + hex[1], 16);
+                g = parseInt(hex[2] + hex[2], 16);
+                b = parseInt(hex[3] + hex[3], 16);
+            } else if (hex.length === 7) {
+                r = parseInt(hex.substring(1, 3), 16);
+                g = parseInt(hex.substring(3, 5), 16);
+                b = parseInt(hex.substring(5, 7), 16);
+            }
+
+            r /= 255; g /= 255; b /= 255;
+
+            const max = Math.max(r, g, b), min = Math.min(r, g, b);
+            let h, s, l = (max + min) / 2;
+
+            if (max === min) {
+                h = s = 0; // Grayscale
+            } else {
+                const d = max - min;
+                s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                switch (max) {
+                    case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                    case g: h = (b - r) / d + 2; break;
+                    case b: h = (r - g) / d + 4; break;
+                }
+                h /= 6;
+            }
+
+            return {
+                h: Math.round(h * 360),
+                s: Math.round(s * 100),
+                l: Math.round(l * 100)
+            };
+        }
+
+        /**
+         * HSB/HSV (H, S_hsv, V)를 RGB (0-255)로 변환합니다.
+         * 이 함수는 HSL 명도(L)를 역산하기 위한 중간 단계로 사용됩니다.
+         */
+        function hsvToRgb(h, s_hsv, v) {
+            h /= 360; // H (0-1)
+            s_hsv = Math.max(0, Math.min(1, s_hsv)); // S_hsv (0-1)
+            v = Math.max(0, Math.min(1, v));         // V (0-1)
+
+            let r, g, b;
+            let i = Math.floor(h * 6);
+            let f = h * 6 - i;
+            let p = v * (1 - s_hsv);
+            let q = v * (1 - f * s_hsv);
+            let t = v * (1 - (1 - f) * s_hsv);
+
+            switch (i % 6) {
+                case 0: r = v; g = t; b = p; break;
+                case 1: r = q; g = v; b = p; break;
+                case 2: r = p; g = v; b = t; break;
+                case 3: r = p; g = q; b = v; break;
+                case 4: r = t; g = p; b = v; break;
+                case 5: r = v; g = p; b = q; break;
+            }
+
+            return {
+                r: Math.round(r * 255),
+                g: Math.round(g * 255),
+                b: Math.round(b * 255)
+            };
+        }
+
+        /**
+         * RGB (0-255)를 HSL Lightness (L, 0-100)로 변환합니다.
+         */
+        function rgbToHslLightness(r, g, b) {
+            r /= 255; g /= 255; b /= 255;
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            let l = (max + min) / 2;
+            return Math.round(l * 100);
+        }
+
+        // -----------------------------------------------------------
+        // 2. 배색 원리 구현 함수
+        // -----------------------------------------------------------
+
+        /**
+         * 선택된 색상(H, S, L)을 기반으로 배색 원리에 따른 5가지 색상을 계산합니다.
+         */
+        function calculatePalette(h, s, l) {
+            
+            const baseH = h;
+            const baseS = s;
+            const baseL = l;
+
+            // --- 1. Calculate All Colors ---
+
+            // Main Color (포인트 색상)
+            const mainColor = { hex: hslToHex(baseH, baseS, baseL), type: "포인트 색상", principle: "Main" };
+
+            // Complementary Color (보색 대비 - H ± 180°)
+            const hComp = (baseH + 180) % 360;
+            const sComp = Math.min(100, baseS + 5); 
+            const lComp = Math.max(10, Math.min(90, baseL)); 
+            const compColor = { 
+                hex: hslToHex(hComp, sComp, lComp), 
+                type: "보색", 
+                principle: "보색 대비 (Complementary Contrast)" 
+            };
+
+            // Analogous Color 1 (+30°) (유사색 대비)
+            const hAnalog1 = (baseH + 30) % 360;
+            const analog1Color = { 
+                hex: hslToHex(hAnalog1, baseS, baseL), 
+                type: "유사색 (+30°)", 
+                principle: "유사색 대비 (Analogous Contrast)" 
+            };
+
+            // Analogous Color 2 (-30°) (유사색 대비)
+            const hAnalog2 = (baseH - 30 + 360) % 360;
+            const analog2Color = { 
+                hex: hslToHex(hAnalog2, baseS, baseL), 
+                type: "유사색 (-30°)", 
+                principle: "유사색 대비 (Analogous Contrast)" 
+            };
+            
+            // Tone-on-Tone (Lighter) (밝게)
+            const lToneL = Math.min(95, baseL + 15);
+            const sToneL = Math.max(10, baseS - 10); 
+            const toneLightColor = { 
+                hex: hslToHex(baseH, sToneL, lToneL), 
+                type: "톤온톤 (밝게)", 
+                principle: "톤온톤 (Tone-on-Tone)" 
+            };
+
+            // Tone-on-Tone (Darker) (어둡게)
+            const lToneD = Math.max(15, baseL - 15);
+            const sToneD = Math.max(20, baseS - 20);
+            const toneDarkColor = { 
+                hex: hslToHex(baseH, sToneD, lToneD), 
+                type: "톤온톤 (어둡게)", 
+                principle: "톤온톤 (Tone-on-Tone)" 
+            };
+            
+            // --- 2. Construct Palette in Requested Order (Main -> Tone Dark -> Tone Light -> Analogous +30 -> Analogous -30 -> Complementary) ---
+            const palette = [];
+            palette.push(mainColor);
+            palette.push(toneDarkColor);    // 1. 톤온톤 (어둡게)
+            palette.push(toneLightColor);   // 2. 톤온톤 (밝게)
+            palette.push(analog1Color);     // 3. 유사색 (+30°)
+            palette.push(analog2Color);     // 4. 유사색 (-30°)
+            palette.push(compColor);        // 5. 보색
+
+            return palette;
+        }
+
+        // -----------------------------------------------------------
+        // 3. UI 및 이벤트 처리
+        // -----------------------------------------------------------
+
+        const colorField = document.getElementById('colorField');
+        const hueSlider = document.getElementById('hueSlider');
+        const selectionMarker = document.getElementById('selectionMarker');
+        const hueMarker = document.getElementById('hueMarker');
+        const currentHexElement = document.getElementById('currentHex');
+        const paletteContainer = document.getElementById('paletteContainer');
+        
+        // 상태 변수 (STATE VARIABLES)
+        // 전역 변수 선언 시 let 키워드를 사용하여 ReferenceError를 방지합니다.
+        let currentHue = 0;      // 색상 (0-360)
+        let currentSaturation = 100; // 채도 (0-100)
+        let currentLightness = 50;   // 명도 (0-100)
+
+        // 초기 상태 설정
+        let isDraggingColor = false;
+        let isDraggingHue = false;
+
+
+        /**
+         * S/L 필드의 배경색을 현재 선택된 Hue에 따라 업데이트합니다.
+         */
+        function updateColorFieldBackground(hue) {
+            // Saturation 100%, Lightness 50%일 때의 색상
+            const baseColor = `hsl(${hue}, 100%, 50%)`;
+            colorField.style.backgroundColor = baseColor;
+        }
+        
+        /**
+         * S/L 필드, HEX 표시, 팔레트 전체를 업데이트합니다.
+         */
+        function updateAll() {
+            const currentHex = hslToHex(currentHue, currentSaturation, currentLightness);
+            
+            // 1. HEX 코드 업데이트
+            currentHexElement.textContent = currentHex;
+            currentHexElement.style.color = currentHex;
+            selectionMarker.style.backgroundColor = currentHex; // 마커 색상도 업데이트
+
+            // 2. 팔레트 계산 및 렌더링
+            const palette = calculatePalette(currentHue, currentSaturation, currentLightness);
+            paletteContainer.innerHTML = ''; // 팔레트 컨테이너 비우기
+
+            palette.forEach((color, index) => {
+                // HEX 코드를 HSL로 변환하여 명도(L)를 얻어 텍스트 색상을 결정합니다.
+                const { l } = hexToHsl(color.hex); 
+                const textColor = l > 60 ? 'text-gray-800' : 'text-gray-100';
+                
+                const isMain = index === 0;
+                const borderStyle = isMain ? 'border-4 border-gray-400 shadow-xl' : 'border border-gray-200 shadow-md';
+                const labelText = isMain ? '포인트 색상' : color.type;
+                
+                // 정사각형 비율 유지 (Padding Hack)
+                const boxHtml = `
+                    <div class="color-box relative w-full h-0 pb-[100%] rounded-xl overflow-hidden ${borderStyle}" style="background-color: ${color.hex};">
+                        <div class="absolute inset-0 flex flex-col justify-end p-2 sm:p-3 bg-black bg-opacity-30 rounded-xl">
+                            <span class="text-sm font-bold ${textColor}">${color.hex}</span>
+                            <span class="text-xs font-medium text-gray-200 mt-1">${labelText}</span>
+                            <span class="text-xs font-light text-gray-300 mt-0.5">${color.principle || 'N/A'}</span>
+                        </div>
+                    </div>
+                `;
+                paletteContainer.innerHTML += boxHtml;
+            });
+        }
+        
+        /**
+         * S/L 필드 클릭/드래그 핸들러
+         */
+        function handleColorFieldInteraction(event) {
+            const rect = colorField.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+
+            // X축 (Saturation): 0 (Left) to 1 (Right) -> HSB Saturation (S_hsv)
+            const s_hsv = Math.min(1, Math.max(0, x / rect.width)); 
+            
+            // Y축 (Value/Brightness): 1 (Top) to 0 (Bottom) -> HSB Value (V)
+            const l_perc = Math.min(1, Math.max(0, y / rect.height));
+            const v_hsv = 1 - l_perc; 
+
+            // 1. HSB/HSV 값을 RGB로 변환하여 시각적으로 선택된 색상을 얻습니다.
+            const { r, g, b } = hsvToRgb(currentHue, s_hsv, v_hsv);
+
+            // 2. RGB에서 HSL Lightness (L)를 역산합니다. (이것이 불일치 해결의 핵심)
+            currentLightness = rgbToHslLightness(r, g, b);
+            
+            // 3. HSL S(채도)는 HSB S(채도)와 다르지만, 배색 원리 계산을 위해 HSB S 값을 사용합니다.
+            // S_hsv (0-1)를 0-100으로 변환하여 저장합니다.
+            currentSaturation = Math.round(s_hsv * 100); 
+
+
+            // 마커 위치 업데이트
+            selectionMarker.style.left = `${s_hsv * 100}%`;
+            selectionMarker.style.top = `${l_perc * 100}%`;
+            selectionMarker.classList.remove('opacity-0');
+
+            updateAll();
+        }
+
+        /**
+         * Hue 슬라이더 클릭/드래그 핸들러
+         */
+        function handleHueSliderInteraction(event) {
+            const rect = hueSlider.getBoundingClientRect();
+            const y = event.clientY - rect.top;
+
+            // Y축 (Hue): 0 (Bottom) to 360 (Top)
+            const h_perc = Math.min(1, Math.max(0, y / rect.height));
+            
+            // CSS 그라데이션이 to top (아래 0도, 위 360도)이므로, y=0(상단)이 360도, y=1(하단)이 0도에 가깝습니다.
+            currentHue = Math.round((1 - h_perc) * 360) % 360;
+
+            // 마커 위치 업데이트
+            hueMarker.style.top = `${h_perc * 100}%`;
+            hueMarker.classList.remove('opacity-0');
+            hueMarker.style.backgroundColor = hslToHex(currentHue, 100, 50);
+
+            // S/L 필드의 배경색을 업데이트하고 전체 UI 업데이트
+            updateColorFieldBackground(currentHue);
+            
+            // Hue가 변경되었으므로, 현재 마커 위치에서 Lightness를 다시 계산하여 업데이트합니다.
+            // 마커의 현재 위치(s_hsv, l_perc)를 가져와 handleColorFieldInteraction를 호출합니다.
+            const s_hsv = currentSaturation / 100; // 현재 Saturation (0-1)
+            
+            // HSB/HSV의 V(Value)를 구하기 위해 HSL L(Lightness)을 역산하는 과정이 필요합니다.
+            // HSL L을 기반으로 다시 l_perc(0-1)를 계산하고, 이것을 1에서 빼서 V(Value)로 사용해야 합니다.
+            // 복잡한 HSL <-> HSV 변환 문제를 피하기 위해,
+            // 현재 Lightness를 기준으로 다시 필드 내 마커의 y좌표(l_perc)를 역산합니다.
+            
+            // HSB/HSV 값을 RGB로 변환하여 시각적으로 선택된 색상을 얻습니다.
+            // HSB V 값 (0-1)을 구합니다. (1 - l_perc는 필드 y축 위치를 나타냄)
+            const max = Math.max(0, 2 * currentLightness / 100 - currentSaturation / 100);
+            const v_hsv = max + (currentSaturation / 100) * (1 - max);
+            const l_perc = 1 - v_hsv;
+
+            const { r, g, b } = hsvToRgb(currentHue, s_hsv, v_hsv);
+
+            // RGB에서 HSL Lightness (L)를 역산합니다.
+            currentLightness = rgbToHslLightness(r, g, b);
+            
+            updateAll();
+        }
+
+        // 마우스 다운 이벤트 설정
+        colorField.addEventListener('mousedown', (e) => {
+            isDraggingColor = true;
+            handleColorFieldInteraction(e);
+        });
+        hueSlider.addEventListener('mousedown', (e) => {
+            isDraggingHue = true;
+            handleHueSliderInteraction(e);
+        });
+
+        // 마우스 무브 이벤트 설정
+        document.addEventListener('mousemove', (e) => {
+            if (isDraggingColor) {
+                handleColorFieldInteraction(e);
+            } else if (isDraggingHue) {
+                handleHueSliderInteraction(e);
+            }
+        });
+
+        // 마우스 업 이벤트 설정
+        document.addEventListener('mouseup', () => {
+            isDraggingColor = false;
+            isDraggingHue = false;
+        });
+        
+        // 터치 이벤트 지원 추가 (모바일 반응성)
+        const touchHandler = (interactionFunction) => (event) => {
+            event.preventDefault(); // 스크롤 방지
+            const touch = event.touches[0];
+            interactionFunction(touch);
+        };
+
+        // S/L 필드 터치 이벤트
+        colorField.addEventListener('touchstart', touchHandler(handleColorFieldInteraction), { passive: false });
+        colorField.addEventListener('touchmove', touchHandler(handleColorFieldInteraction), { passive: false });
+        colorField.addEventListener('touchend', () => isDraggingColor = false);
+
+        // Hue 슬라이더 터치 이벤트
+        hueSlider.addEventListener('touchstart', touchHandler(handleHueSliderInteraction), { passive: false });
+        // Touchmove는 S/L과 Hue 슬라이더 모두에서 정확한 위치 계산을 위해 touchHandler(handleHueSliderInteraction)를 사용해야 합니다.
+        hueSlider.addEventListener('touchmove', touchHandler(handleHueSliderInteraction), { passive: false }); 
+        hueSlider.addEventListener('touchend', () => isDraggingHue = false);
+
+
+        /**
+         * 초기화 함수
+         */
+        function initialize() {
+            // 초기 HSL 값 설정 (빨강, 100%, 50%)
+            // 전역 변수로 선언되었으므로, 여기서 다시 let/const로 선언하지 않습니다.
+            currentHue = 0;
+            currentSaturation = 100;
+            currentLightness = 50;
+            const l_perc = 1 - (currentLightness / 100); // 50% -> 0.5
+
+            // 1. Hue 슬라이더 초기 마커 위치 (가장 아래)
+            hueMarker.style.top = '100%';
+            hueMarker.classList.remove('opacity-0');
+            hueMarker.style.backgroundColor = hslToHex(currentHue, 100, 50);
+            
+            // 2. S/L 필드 초기 배경색 설정
+            updateColorFieldBackground(currentHue);
+            
+            // 3. S/L 필드 초기 마커 위치 (Saturation 100%, Lightness 50% -> 중앙)
+            selectionMarker.style.left = '100%'; // S=100%
+            selectionMarker.style.top = `${l_perc * 100}%`; // L=50% -> 50% 위치
+            selectionMarker.classList.remove('opacity-0');
+
+            // 4. 전체 업데이트
+            updateAll();
+        }
+
+        // 앱 시작
+        document.addEventListener('DOMContentLoaded', initialize);
+    </script>
+</body>
+</html>
